@@ -2,7 +2,6 @@
 
 import 'dart:math';
 import 'package:flutter/material.dart';
-import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'gemini_service.dart';
 
 void main() async {
@@ -10,7 +9,7 @@ void main() async {
   try {
     await GeminiService.initialize();
   } catch (e) {
-    print('Warning: Could not initialize Gemini service: $e');
+    // Warning: Could not initialize Gemini service
   }
   runApp(const BlackjackApp());
 }

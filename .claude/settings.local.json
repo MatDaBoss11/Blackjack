@@ -2,7 +2,10 @@
   "permissions": {
     "allow": [
       "Bash(flutter pub:*)",
-      "Bash(flutter build:*)"
+      "Bash(flutter build:*)",
+      "Bash(flutter:*)",
+      "WebSearch",
+      "Bash(mkdir:*)"
     ],
     "defaultMode": "acceptEdits"
   }
