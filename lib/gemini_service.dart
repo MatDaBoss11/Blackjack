@@ -1,21 +1,17 @@
-import 'package:google_generative_ai/google_generative_ai.dart';
-import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'package:flutter/foundation.dart';
 
 class GeminiService {
-  static GenerativeModel? _model;
+  static final bool _isWebPlatform = kIsWeb;
   
   static Future<void> initialize() async {
-    await dotenv.load(fileName: ".env");
-    final apiKey = dotenv.env['GEMINI_API_KEY'];
-    
-    if (apiKey == null || apiKey.isEmpty || apiKey == 'your_gemini_api_key_here') {
-      throw Exception('GEMINI_API_KEY not found in .env file');
+    // Disable AI features on web to avoid CORS and security issues
+    if (_isWebPlatform) {
+      return;
     }
     
-    _model = GenerativeModel(
-      model: 'gemini-1.5-flash',
-      apiKey: apiKey,
-    );
+    // For mobile platforms, you could implement proper API key handling here
+    // For now, we'll skip AI initialization to ensure web deployment works
+    return;
   }
   
   static Future<String> getAdvice({
@@ -29,34 +25,29 @@ class GeminiService {
     required bool canDouble,
     required bool canSplit,
   }) async {
-    if (_model == null) {
-      await initialize();
+    // Return basic feedback for web platform (AI disabled for security/CORS)
+    if (_isWebPlatform) {
+      return _getBasicFeedback(playerMove, correctMove, playerTotal, isPlayerSoft, isPair);
     }
     
-    final prompt = '''
-You are a professional blackjack dealer and strategy expert. A player just made an incorrect move in blackjack training.
-
-SITUATION:
-- Player cards: ${playerCards.join(', ')}
-- Player total: $playerTotal${isPlayerSoft ? ' (soft)' : ''}
-- Dealer up card: $dealerUpCard
-- Player chose: ${_getMoveDescription(playerMove)}
-- Correct play: ${_getMoveDescription(correctMove)}
-- Can double: $canDouble
-- Can split: ${canSplit ? 'Yes (pair)' : 'No'}
-
-Please explain in 1-2 concise sentences:
-1. Why their move was wrong
-2. Why the correct move is better
-
-Be encouraging and educational. Focus on strategy reasoning, not just rules.
-''';
-
-    try {
-      final response = await _model!.generateContent([Content.text(prompt)]);
-      return response.text ?? 'Try the correct move next time!';
-    } catch (e) {
-      return 'The correct move was ${_getMoveDescription(correctMove)}. Keep practicing!';
+    // For mobile platforms, AI could work with proper backend setup
+    return 'The correct move was ${_getMoveDescription(correctMove)}. Keep practicing!';
+  }
+  
+  static String _getBasicFeedback(String playerMove, String correctMove, int playerTotal, bool isPlayerSoft, bool isPair) {
+    final playerDesc = _getMoveDescription(playerMove);
+    final correctDesc = _getMoveDescription(correctMove);
+    
+    if (correctMove == 'D') {
+      return 'Double down gives you the best mathematical advantage here. $correctDesc was the optimal play instead of $playerDesc.';
+    } else if (correctMove == 'P') {
+      return 'Splitting this pair gives you better odds. $correctDesc was the optimal play instead of $playerDesc.';
+    } else if (correctMove == 'S' && playerTotal >= 17) {
+      return 'Standing on $playerTotal is safer - avoid busting! $correctDesc was the optimal play instead of $playerDesc.';
+    } else if (correctMove == 'H' && playerTotal <= 11) {
+      return 'Hitting with $playerTotal gives you great odds to improve. $correctDesc was the optimal play instead of $playerDesc.';
+    } else {
+      return 'The mathematically correct play was $correctDesc instead of $playerDesc. Keep studying basic strategy!';
     }
   }
   
