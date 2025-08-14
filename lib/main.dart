@@ -1,7 +1,19 @@
+// ignore_for_file: prefer_interpolation_to_compose_strings
+
 import 'dart:math';
 import 'package:flutter/material.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
+import 'gemini_service.dart';
 
-void main() => runApp(const BlackjackApp());
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  try {
+    await GeminiService.initialize();
+  } catch (e) {
+    print('Warning: Could not initialize Gemini service: $e');
+  }
+  runApp(const BlackjackApp());
+}
 
 class BlackjackApp extends StatelessWidget {
   const BlackjackApp({super.key});
@@ -69,18 +81,34 @@ class Hand {
   int get total {
     int sum = 0; int aces = 0;
     for (final c in cards) {
-      if (c.rank == 'A') aces++; else sum += c.value;
+      if (c.rank == 'A') {
+        aces++;
+      } else {
+        sum += c.value;
+      }
     }
     sum += aces * 11;
-    while (sum > 21 && aces > 0) { sum -= 10; aces--; }
+    while (sum > 21 && aces > 0) { 
+      sum -= 10; 
+      aces--; 
+    }
     return sum;
   }
   bool get isSoft {
     int sum = 0; int aces = 0;
-    for (final c in cards) { if (c.rank == 'A') aces++; else sum += c.value; }
+    for (final c in cards) { 
+      if (c.rank == 'A') {
+        aces++;
+      } else {
+        sum += c.value;
+      }
+    }
     sum += aces * 11;
     int softAces = aces;
-    while (sum > 21 && softAces > 0) { sum -= 10; softAces--; }
+    while (sum > 21 && softAces > 0) { 
+      sum -= 10; 
+      softAces--; 
+    }
     return softAces > 0;
   }
   bool get isBust => total > 21;
@@ -201,7 +229,7 @@ class _TrainerScreenState extends State<TrainerScreen> {
       player.cards.add(shoe.draw());
       dealer.cards.add(shoe.draw());
       phase = Phase.playerTurn;
-      if (player.isBlackjack || dealer.isBlackjack){
+      if (player.isBlackjack || dealer.isBlackjack) {
         _revealAndSettle();
       }
     });
@@ -226,23 +254,61 @@ class _TrainerScreenState extends State<TrainerScreen> {
     // handle single or split sequence
     List<Hand> handsToScore = [player, ...splitHands];
     for (final h in handsToScore){
-      if (h.isBust) losses++;
-      else if (dealer.isBust) wins++;
-      else if (h.total > dealer.total) wins++;
-      else if (h.total < dealer.total) losses++;
-      else pushes++;
+      if (h.isBust) {
+        losses++;
+      } else if (dealer.isBust) {
+        wins++;
+      } else if (h.total > dealer.total) {
+        wins++;
+      } else if (h.total < dealer.total) {
+        losses++;
+      } else {
+        pushes++;
+      }
     }
     hands += handsToScore.length;
     phase = Phase.roundOver;
     setState((){});
   }
 
-  void _showFeedback(bool wasCorrect, String shouldLabel){
+  void _showFeedback(bool wasCorrect, String shouldLabel, {String? playerMove, String? correctMove}){
     setState((){
-      feedback = wasCorrect ? 'Correct move!' : 'Incorrect. Correct play: $shouldLabel';
-      feedbackColor = wasCorrect ? Colors.green : Colors.red;
-      if (wasCorrect) correct++;
+      if (wasCorrect) {
+        feedback = 'Correct move!';
+        feedbackColor = Colors.green;
+        correct++;
+      } else {
+        feedback = 'Analyzing your move...';
+        feedbackColor = Colors.orange;
+        _getAIFeedback(playerMove ?? '', correctMove ?? '', shouldLabel);
+      }
     });
+  }
+  
+  Future<void> _getAIFeedback(String playerMove, String correctMove, String shouldLabel) async {
+    try {
+      final aiAdvice = await GeminiService.getAdvice(
+        playerMove: playerMove,
+        correctMove: correctMove,
+        playerCards: activeHand.cards.map((c) => c.pretty).toList(),
+        dealerUpCard: dealer.cards.first.pretty,
+        playerTotal: activeHand.total,
+        isPlayerSoft: activeHand.isSoft,
+        isPair: activeHand.isPair,
+        canDouble: canDouble,
+        canSplit: canSplit,
+      );
+      
+      setState(() {
+        feedback = aiAdvice;
+        feedbackColor = Colors.red;
+      });
+    } catch (e) {
+      setState(() {
+        feedback = 'Incorrect. Correct play: $shouldLabel';
+        feedbackColor = Colors.red;
+      });
+    }
   }
 
   Hand get activeHand => currentHandIndex == 0 ? player : splitHands[currentHandIndex - 1];
@@ -251,23 +317,23 @@ class _TrainerScreenState extends State<TrainerScreen> {
   bool get canSplit => phase == Phase.playerTurn && activeHand.isPair && !doubled;
 
   void _nextHandOrDealer(){
-    if (currentHandIndex < splitHands.length){
-      currentHandIndex++;
-      // If we just moved onto a hand created by splitting aces, auto-stand because one card only rule
-      if (justSplitAces && activeHand.cards.length == 1){
-        activeHand.cards.add(shoe.draw());
-        _finalizePlayerHand();
+          if (currentHandIndex < splitHands.length) {
+        currentHandIndex++;
+        // If we just moved onto a hand created by splitting aces, auto-stand because one card only rule
+        if (justSplitAces && activeHand.cards.length == 1) {
+          activeHand.cards.add(shoe.draw());
+          _finalizePlayerHand();
+        }
+        setState((){});
+      } else {
+        hideHole = false;
+        _dealerPlayS17();
+        _settleAll();
       }
-      setState((){});
-    } else {
-      hideHole = false;
-      _dealerPlayS17();
-      _settleAll();
-    }
   }
 
   void _finalizePlayerHand(){
-    if (activeHand.isBust){
+    if (activeHand.isBust) {
       _nextHandOrDealer();
       return;
     }
@@ -276,18 +342,24 @@ class _TrainerScreenState extends State<TrainerScreen> {
   }
 
   void playerMove(String move){
-    if (phase != Phase.playerTurn) return;
+    if (phase != Phase.playerTurn) {
+      return;
+    }
     final code = recommendMove(hand: activeHand, dealerUp: dealer.cards.first, canDouble: canDouble, canSplit: canSplit);
     final should = _toLabel(code, canDouble);
     final normalized = _normalize(move, canDouble);
     final normalizedShould = _normalize(should.code, canDouble);
     final isRight = normalized == normalizedShould;
-    _showFeedback(isRight, should.label);
+    _showFeedback(isRight, should.label, playerMove: move, correctMove: should.code);
 
     switch(move){
       case 'H':
         activeHand.cards.add(shoe.draw());
-        if (activeHand.isBust){ _finalizePlayerHand(); } else { setState((){}); }
+        if (activeHand.isBust){ 
+          _finalizePlayerHand(); 
+        } else { 
+          setState((){}); 
+        }
         break;
       case 'S':
         _finalizePlayerHand();
@@ -305,7 +377,10 @@ class _TrainerScreenState extends State<TrainerScreen> {
         }
         break;
       case 'P':
-        if (!canSplit){ setState((){}); break; }
+        if (!canSplit){ 
+          setState((){}); 
+          break; 
+        }
         // split into two hands
         final left = Hand();
         final right = Hand();
@@ -344,95 +419,325 @@ class _TrainerScreenState extends State<TrainerScreen> {
     return code;
   }
 
-  @override
-  Widget build(BuildContext context) {
-    final active = activeHand;
-    return Scaffold(
-      appBar: AppBar(title: const Text('Blackjack Trainer • 2-Deck • S17')),
-      body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text('Hands: $hands  Correct: $correct  Win: $wins  Loss: $losses  Push: $pushes'),
-                  Row(children: [
-                    FilledButton.tonal(onPressed: newShoe, child: const Text('New Shoe')),
-                    const SizedBox(width: 8),
-                    FilledButton(onPressed: phase==Phase.betting?deal:null, child: const Text('Deal')),
-                  ])
-                ],
-              ),
-              const SizedBox(height: 12),
-              Card(
-                child: Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text('Dealer', style: TextStyle(fontWeight: FontWeight.bold)),
-                      const SizedBox(height: 6),
-                      Wrap(spacing: 8, children: dealer.cards.asMap().entries.map((e){
-                        final idx = e.key; final c = e.value;
-                        final shown = idx==1 && hideHole ? CardModel('🂠','') : c;
-                        return _cardChip(shown.pretty);
-                      }).toList()),
-                      const SizedBox(height: 6),
-                      Text('Total: ' + (hideHole? '?': dealer.total.toString())),
-                    ],
-                  ),
-                ),
-              ),
-              const SizedBox(height: 12),
-              Card(
-                child: Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text('Player' + (splitHands.isEmpty? '' : ' (Hand ${currentHandIndex+1}/${splitHands.length+1})'), style: const TextStyle(fontWeight: FontWeight.bold)),
-                      const SizedBox(height: 6),
-                      Wrap(spacing: 8, children: active.cards.map((c)=>_cardChip(c.pretty)).toList()),
-                      const SizedBox(height: 6),
-                      Text('Total: ${active.total}' + (active.isSoft? ' (soft)': '')),
-                      if (feedback.isNotEmpty) Padding(
-                        padding: const EdgeInsets.only(top: 8.0),
-                        child: Text(feedback, style: TextStyle(color: feedbackColor, fontWeight: FontWeight.bold)),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-              const Spacer(),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                children: [
-                  FilledButton(onPressed: phase==Phase.playerTurn?()=>playerMove('H'):null, child: const Text('Hit')),
-                  FilledButton.tonal(onPressed: phase==Phase.playerTurn?()=>playerMove('S'):null, child: const Text('Stand')),
-                  FilledButton(onPressed: phase==Phase.playerTurn?()=>playerMove('D'):null, child: Text('Double' + (canDouble? '': ' (N/A)'))),
-                  FilledButton(onPressed: phase==Phase.playerTurn?()=>playerMove('P'):null, child: Text('Split' + (canSplit? '': ' (N/A)'))),
-                ],
-              ),
-              const SizedBox(height: 12),
-              if (phase==Phase.roundOver)
-                FilledButton(
-                  onPressed: ()=>deal(),
-                  child: const Text('Next Hand'),
-                )
-            ],
-          ),
+  Color _suitColor(String suit){
+    return (suit == '♥' || suit == '♦') ? Colors.red.shade700 : Colors.black87;
+  }
+
+  Widget _playingCard(CardModel c, {bool faceDown = false, double scale = 1.0}){
+    final double width = 64 * scale; // aspect ~0.7
+    final double height = 90 * scale;
+    if (faceDown){
+      return Container(
+        width: width,
+        height: height,
+        margin: const EdgeInsets.symmetric(horizontal: 6),
+        decoration: BoxDecoration(
+          color: Colors.red.shade700,
+          borderRadius: BorderRadius.circular(8),
+          boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.3), blurRadius: 8, offset: const Offset(0, 4))],
+          border: Border.all(color: Colors.white.withValues(alpha: 0.8), width: 2),
         ),
+      );
+    }
+    return Container(
+      width: width,
+      height: height,
+      margin: const EdgeInsets.symmetric(horizontal: 6),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(8),
+                  boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.25), blurRadius: 8, offset: const Offset(0, 4))],
+      ),
+      child: Stack(
+        children: [
+          Positioned(
+            left: 8,
+            top: 6,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(c.rank, style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700, color: _suitColor(c.suit))),
+                Text(c.suit, style: TextStyle(fontSize: 18, height: 1.05, color: _suitColor(c.suit))),
+              ],
+            ),
+          ),
+          Positioned(
+            right: 8,
+            bottom: 6,
+            child: Transform.rotate(
+              angle: 3.1416,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(c.rank, style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700, color: _suitColor(c.suit))),
+                  Text(c.suit, style: TextStyle(fontSize: 18, height: 1.05, color: _suitColor(c.suit))),
+                ],
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
 
-  Widget _cardChip(String text){
-    return Chip(
-      label: Text(text, style: const TextStyle(fontFeatures: [FontFeature.tabularFigures()])),
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+  ButtonStyle get _actionStyle => FilledButton.styleFrom(
+    backgroundColor: Colors.green.shade600,
+    foregroundColor: Colors.white,
+    padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 20),
+    textStyle: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800),
+    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+    elevation: 8,
+    shadowColor: Colors.black.withValues(alpha: 0.3),
+  );
+
+  Widget _doubleChipButton({required VoidCallback? onPressed, required bool enabled}){
+    return ElevatedButton(
+      onPressed: enabled ? onPressed : null,
+      style: ElevatedButton.styleFrom(
+        backgroundColor: Colors.black,
+        foregroundColor: Colors.white,
+        disabledBackgroundColor: Colors.black54,
+        shape: const CircleBorder(),
+        padding: const EdgeInsets.all(24),
+        elevation: 8,
+        shadowColor: Colors.black.withValues(alpha: 0.4),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: const [
+          Text('Double', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 16)),
+          Text('x2', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final active = activeHand;
+    return Scaffold(
+      body: SafeArea(
+        child: Container(
+          decoration: BoxDecoration(
+            gradient: RadialGradient(
+              center: const Alignment(-0.3, -0.7),
+              radius: 1.2,
+              colors: [
+                Colors.green.shade700,
+                Colors.green.shade900,
+              ],
+            ),
+          ),
+          child: Stack(
+            children: [
+              // Top-right controls
+              Positioned(
+                right: 12,
+                top: 8,
+                child: Row(
+                  children: [
+                    FilledButton.tonal(onPressed: newShoe, child: const Text('New Shoe')),
+                    const SizedBox(width: 8),
+                    FilledButton(onPressed: phase==Phase.betting?deal:null, child: const Text('Deal')),
+                  ],
+                ),
+              ),
+
+              // Dealer area (top center)
+              Align(
+                alignment: const Alignment(0, -0.75),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Text('Dealer', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
+                    const SizedBox(height: 8),
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: dealer.cards.asMap().entries.map((e){
+                        final idx = e.key; final c = e.value;
+                        final faceDown = idx==1 && hideHole;
+                        return _playingCard(c, faceDown: faceDown, scale: 1.1);
+                      }).toList(),
+                    ),
+                    const SizedBox(height: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                      decoration: BoxDecoration(color: Colors.black.withValues(alpha: 0.35), borderRadius: BorderRadius.circular(20)),
+                      child: Text('Total: ${hideHole ? '?' : dealer.total}', style: const TextStyle(color: Colors.white)),
+                    ),
+                  ],
+                ),
+              ),
+
+              // Actions area (center)
+              Align(
+                alignment: const Alignment(0, -0.08),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                  children: [
+                    SizedBox(
+                      width: 150,
+                      child: FilledButton(
+                        onPressed: phase==Phase.playerTurn?()=>playerMove('H'):null,
+                        style: _actionStyle,
+                        child: const Text('HIT'),
+                      ),
+                    ),
+                    _doubleChipButton(
+                      onPressed: ()=>playerMove('D'),
+                      enabled: phase==Phase.playerTurn && canDouble,
+                    ),
+                    SizedBox(
+                      width: 150,
+                      child: FilledButton(
+                        onPressed: phase==Phase.playerTurn?()=>playerMove('S'):null,
+                        style: _actionStyle,
+                        child: const Text('STAND'),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
+              // Optional Split chip under the center if available
+              if (phase==Phase.playerTurn)
+                Align(
+                  alignment: const Alignment(0, 0.18),
+                  child: ElevatedButton(
+                    onPressed: canSplit ? ()=>playerMove('P') : null,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: canSplit ? Colors.orange.shade600 : Colors.grey.shade600,
+                      foregroundColor: Colors.white,
+                      disabledBackgroundColor: Colors.grey.shade500,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                      padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 16),
+                      elevation: canSplit ? 8 : 2,
+                      shadowColor: Colors.black.withValues(alpha: 0.3),
+                    ),
+                                          child: Text(
+                        'Split${canSplit ? '' : ' (N/A)'}',
+                        style: TextStyle(
+                          fontWeight: FontWeight.w800,
+                          fontSize: canSplit ? 18 : 16,
+                        ),
+                      ),
+                  ),
+                ),
+
+              // Player area (bottom center)
+              Align(
+                alignment: const Alignment(0, 0.65),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      'Player' + (splitHands.isEmpty? '' : ' (Hand ${currentHandIndex+1}/${splitHands.length+1})'),
+                      style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
+                    ),
+                    const SizedBox(height: 8),
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: active.cards.map((c)=>_playingCard(c, scale: 1.2)).toList(),
+                    ),
+                    const SizedBox(height: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                      decoration: BoxDecoration(color: Colors.black.withValues(alpha: 0.35), borderRadius: BorderRadius.circular(20)),
+                      child: Text('Total: ${active.total}${active.isSoft ? ' (soft)' : ''}', style: const TextStyle(color: Colors.white)),
+                    ),
+                    if (feedback.isNotEmpty) 
+                      Container(
+                        margin: const EdgeInsets.only(top: 16.0),
+                        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+                        decoration: BoxDecoration(
+                          color: feedbackColor == Colors.green 
+                            ? Colors.green.shade100.withValues(alpha: 0.9)
+                            : feedbackColor == Colors.orange
+                              ? Colors.orange.shade100.withValues(alpha: 0.9)
+                              : Colors.red.shade100.withValues(alpha: 0.9),
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(
+                            color: feedbackColor == Colors.green 
+                              ? Colors.green.shade600 
+                              : feedbackColor == Colors.orange
+                                ? Colors.orange.shade600
+                                : Colors.red.shade600,
+                            width: 3,
+                          ),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withValues(alpha: 0.2),
+                              blurRadius: 12,
+                              offset: const Offset(0, 4),
+                            ),
+                          ],
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            if (feedbackColor == Colors.orange)
+                              Padding(
+                                padding: const EdgeInsets.only(right: 12.0),
+                                child: SizedBox(
+                                  width: 20,
+                                  height: 20,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    valueColor: AlwaysStoppedAnimation<Color>(
+                                      Colors.orange.shade600,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            Flexible(
+                              child: Text(
+                                feedback, 
+                                style: TextStyle(
+                                  color: feedbackColor == Colors.green 
+                                    ? Colors.green.shade800 
+                                    : feedbackColor == Colors.orange
+                                      ? Colors.orange.shade800
+                                      : Colors.red.shade800,
+                                  fontWeight: FontWeight.w800,
+                                  fontSize: 18,
+                                ),
+                                textAlign: TextAlign.center,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+
+              // Stats (bottom-left)
+              Positioned(
+                left: 10,
+                bottom: 10,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                  decoration: BoxDecoration(color: Colors.black.withValues(alpha: 0.35), borderRadius: BorderRadius.circular(12)),
+                  child: Text(
+                    'Hands: $hands  Correct: $correct  Win: $wins  Loss: $losses  Push: $pushes',
+                    style: const TextStyle(color: Colors.white),
+                  ),
+                ),
+              ),
+
+              if (phase==Phase.roundOver)
+                Align(
+                  alignment: const Alignment(0, 0.92),
+                  child: FilledButton(
+                    onPressed: ()=>deal(),
+                    style: _actionStyle,
+                    child: const Text('Next Hand'),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }
